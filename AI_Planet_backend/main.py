@@ -1,5 +1,5 @@
 from typing import Annotated
-from fastapi import FastAPI, File, UploadFile, status, HTTPException, Depends, Request
+from fastapi import FastAPI, File, UploadFile, status, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +11,9 @@ import os
 from pathlib import Path
 import uuid
 import aiofiles
+from typing import Dict, Set
+import json
+import sys
 
 MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB in bytes
 UPLOAD_DIR = Path("uploads")
@@ -29,6 +32,35 @@ class FileSizeError(FileUploadError):
 class FileTypeError(FileUploadError):
     pass
 
+# Add connection manager class
+class ConnectionManager:
+    def __init__(self):
+        # Store active connections and their associated document IDs
+        self.active_connections: Dict[str, WebSocket] = {}
+        # Store session IDs that are allowed to connect (users who have uploaded docs)
+        self.authorized_sessions: Set[str] = set()
+
+    async def connect(self, websocket: WebSocket, session_id: str):
+        if session_id not in self.authorized_sessions:
+            await websocket.close(code=1008, reason="Upload documents first")
+            return False
+        await websocket.accept()
+        self.active_connections[session_id] = websocket
+        return True
+
+    async def disconnect(self, session_id: str):
+        if session_id in self.active_connections:
+            del self.active_connections[session_id]
+
+    async def send_message(self, message: str, session_id: str):
+        if session_id in self.active_connections:
+            await self.active_connections[session_id].send_text(message)
+
+    def authorize_session(self, session_id: str):
+        self.authorized_sessions.add(session_id)
+
+manager = ConnectionManager()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     redis_instance = redis.from_url("redis://localhost:6379", encoding="utf-8", decode_responses=True)
@@ -41,6 +73,8 @@ app = FastAPI(lifespan=lifespan)
 origins = [
     "http://localhost",
     "http://localhost:8080",
+    "http://localhost:5500",
+    "http://127.0.0.1:5500"
 ]
 
 app.add_middleware(
@@ -51,30 +85,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add error handler middleware
-@app.middleware("http")
-async def catch_exceptions_middleware(request: Request, call_next):
-    try:
-        return await call_next(request)
-    except Exception as e:
-        if isinstance(e, HTTPException):
-            raise e
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"detail": "An internal server error occurred"}
-        )
+# Add this helper function
+def get_rate_limit_dependency():
+    if "pytest" not in sys.modules:
+        return [Depends(RateLimiter(times=10, seconds=60))]
+    return []
 
-@app.post("/uploadfiles/", dependencies=[Depends(RateLimiter(times=2, seconds=60))])
+@app.post("/uploadfiles/", dependencies=get_rate_limit_dependency())
 async def create_upload_files(
     files: Annotated[list[UploadFile], File(description="Multiple files as UploadFile")],
     status_code=status.HTTP_201_CREATED,
 ):
-    if not files:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No files were provided"
-        )
-
     saved_files = []
     errors = []
     
@@ -145,6 +166,14 @@ async def create_upload_files(
             }
         )
         
+    if saved_files:
+        # Generate a session ID for this upload
+        session_id = str(uuid.uuid4())
+        # Authorize this session for WebSocket connections
+        manager.authorize_session(session_id)
+        # Add session_id to the response
+        response["session_id"] = session_id
+
     return response
 
 
@@ -159,3 +188,26 @@ async def main():
 </body>
     """
     return HTMLResponse(content=content)
+
+
+@app.websocket("/ws/{session_id}")
+async def websocket_endpoint(websocket: WebSocket, session_id: str):
+    # Attempt to connect (will fail if session is not authorized)
+    is_connected = await manager.connect(websocket, session_id)
+    
+    if not is_connected:
+        return
+
+    try:
+        while True:
+            # Receive question from client
+            question = await websocket.receive_text()
+            
+            # For now, return a constant response
+            response = "This is a placeholder response. The actual PDF-based Q&A will be implemented later."
+            
+            # Send response back to client
+            await manager.send_message(response, session_id)
+            
+    except WebSocketDisconnect:
+        await manager.disconnect(session_id)

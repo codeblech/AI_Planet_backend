@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Planet - Document Chat</title>
+    <style>
+        .chat-container {
+            max-width: 800px;
+            margin: 20px auto;
+            padding: 20px;
+        }
+        #chatBox {
+            height: 400px;
+            border: 1px solid #ccc;
+            overflow-y: auto;
+            margin-bottom: 10px;
+            padding: 10px;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .user-message {
+            background-color: #e3f2fd;
+            margin-left: 20%;
+        }
+        .ai-message {
+            background-color: #f5f5f5;
+            margin-right: 20%;
+        }
+        #uploadSection {
+            margin-bottom: 20px;
+        }
+        #chatSection {
+            display: none;
+        }
+        .loading {
+            display: none;
+            margin: 10px 0;
+        }
+        #chatSection.connecting {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div id="uploadSection">
+            <h2>Upload PDF Documents</h2>
+            <input type="file" id="fileInput" multiple accept=".pdf">
+            <button onclick="uploadFiles()">Upload</button>
+            <div id="uploadStatus"></div>
+            <div id="uploadLoading" class="loading">Connecting to chat...</div>
+        </div>
+
+        <div id="chatSection">
+            <h2>Chat with your Documents</h2>
+            <div id="chatBox"></div>
+            <input type="text" id="questionInput" placeholder="Ask a question..." style="width: 80%">
+            <button onclick="sendQuestion()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let sessionId = null;
+
+        async function uploadFiles() {
+            const fileInput = document.getElementById('fileInput');
+            const files = fileInput.files;
+            
+            if (files.length === 0) {
+                alert('Please select files to upload');
+                return;
+            }
+
+            const formData = new FormData();
+            for (const file of files) {
+                formData.append('files', file);
+            }
+
+            try {
+                document.getElementById('uploadStatus').innerHTML = 'Uploading files...';
+                
+                const response = await fetch('http://localhost:8000/uploadfiles/', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (response.ok) {
+                    sessionId = result.session_id;
+                    document.getElementById('uploadStatus').innerHTML = 'Upload successful!';
+                    document.getElementById('uploadLoading').style.display = 'block';
+                    
+                    try {
+                        await connectWebSocket();
+                        document.getElementById('uploadSection').style.display = 'none';
+                        document.getElementById('chatSection').style.display = 'block';
+                    } catch (wsError) {
+                        document.getElementById('uploadStatus').innerHTML = 
+                            `WebSocket connection failed: ${wsError.message}. Please refresh and try again.`;
+                        document.getElementById('uploadLoading').style.display = 'none';
+                    }
+                } else {
+                    document.getElementById('uploadStatus').innerHTML = 
+                        `Upload failed: ${result.detail.message || 'Unknown error'}`;
+                }
+            } catch (error) {
+                document.getElementById('uploadStatus').innerHTML = 
+                    `Error: ${error.message}`;
+            }
+        }
+
+        async function connectWebSocket() {
+            return new Promise((resolve, reject) => {
+                try {
+                    ws = new WebSocket(`ws://localhost:8000/ws/${sessionId}`);
+                    
+                    ws.onopen = () => {
+                        console.log('WebSocket connected');
+                        // Send a test message to verify connection
+                        ws.send('connection_test');
+                        // Don't resolve immediately, wait for first message
+                    };
+
+                    ws.onmessage = (event) => {
+                        console.log('Received message:', event.data);
+                        if (!document.getElementById('chatSection').style.display) {
+                            // First message received, connection is stable
+                            resolve();
+                        }
+                        addMessage(event.data, 'ai');
+                    };
+
+                    ws.onclose = () => {
+                        console.log('WebSocket disconnected');
+                        if (!document.getElementById('chatSection').style.display) {
+                            reject(new Error('Connection closed before initialization'));
+                        } else {
+                            // Connection was previously established but now closed
+                            document.getElementById('chatSection').innerHTML += 
+                                '<div class="error-message">Connection lost. Please refresh the page.</div>';
+                        }
+                    };
+
+                    ws.onerror = (error) => {
+                        console.error('WebSocket error:', error);
+                        reject(new Error('Failed to establish connection'));
+                    };
+
+                    // Add timeout for connection
+                    setTimeout(() => {
+                        if (ws.readyState !== WebSocket.OPEN) {
+                            ws.close();
+                            reject(new Error('Connection timeout'));
+                        }
+                    }, 5000);
+                } catch (error) {
+                    reject(error);
+                }
+            });
+        }
+
+        function sendQuestion() {
+            const questionInput = document.getElementById('questionInput');
+            const question = questionInput.value.trim();
+            
+            if (question && ws && ws.readyState === WebSocket.OPEN) {
+                addMessage(question, 'user');
+                ws.send(question);
+                questionInput.value = '';
+            }
+        }
+
+        function addMessage(message, sender) {
+            const chatBox = document.getElementById('chatBox');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}-message`;
+            messageDiv.textContent = message;
+            chatBox.appendChild(messageDiv);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // Allow sending questions with Enter key
+        document.getElementById('questionInput').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendQuestion();
+            }
+        });
+    </script>
+</body>
+</html> 
