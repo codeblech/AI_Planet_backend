@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "ai-planet-backend"
+version = "0.1.0"
+description = "backend service to process pdfs with nlp"
+authors = ["codeblech <my.malikyash@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+fastapi = {extras = ["standard"], version = "^0.115.6"}
+fastapi-limiter = "^0.1.6"
+aiofiles = "^24.1.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
