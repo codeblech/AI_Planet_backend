@@ -26,3 +26,9 @@ more active, used by many popular projects, but doesn't support websockets
 
 
 hence, we'll use redis/redis-stack for local development.
+
+### issue with pytest and fastapi-limiter
+https://github.com/long2ice/fastapi-limiter/issues/51
+
+### serving the frontend
+if frontend is served from a live server like that in vscode, then it must be made sure that the upload folder is not served from that server. this is because the creation of new file in the upload folder will trigger a reload of the frontend, which will break the websocket connection.

@@ -3,64 +3,80 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Planet - Document Chat</title>
+    <title>AI Planet - PDF Q&A</title>
     <style>
-        .chat-container {
+        body {
+            font-family: Arial, sans-serif;
             max-width: 800px;
-            margin: 20px auto;
+            margin: 0 auto;
             padding: 20px;
         }
-        #chatBox {
-            height: 400px;
+        .upload-section, .chat-section {
+            margin: 20px 0;
+            padding: 20px;
             border: 1px solid #ccc;
-            overflow-y: auto;
-            margin-bottom: 10px;
-            padding: 10px;
+            border-radius: 5px;
         }
-        .message {
+        .chat-section {
+            display: none;
+        }
+        #chatHistory {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #eee;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .question, .answer {
             margin: 10px 0;
             padding: 10px;
             border-radius: 5px;
         }
-        .user-message {
+        .question {
             background-color: #e3f2fd;
             margin-left: 20%;
         }
-        .ai-message {
+        .answer {
             background-color: #f5f5f5;
             margin-right: 20%;
         }
-        #uploadSection {
-            margin-bottom: 20px;
+        #questionInput {
+            width: 80%;
+            padding: 10px;
         }
-        #chatSection {
-            display: none;
+        button {
+            padding: 10px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
         }
-        .loading {
-            display: none;
+        button:disabled {
+            background-color: #cccccc;
+        }
+        .error {
+            color: red;
             margin: 10px 0;
-        }
-        #chatSection.connecting {
-            opacity: 0.6;
-            pointer-events: none;
         }
     </style>
 </head>
 <body>
-    <div class="chat-container">
-        <div id="uploadSection">
-            <h2>Upload PDF Documents</h2>
-            <input type="file" id="fileInput" multiple accept=".pdf">
-            <button onclick="uploadFiles()">Upload</button>
-            <div id="uploadStatus"></div>
-            <div id="uploadLoading" class="loading">Connecting to chat...</div>
-        </div>
+    <h1>AI Planet - PDF Q&A System</h1>
+    
+    <div class="upload-section">
+        <h2>Upload PDFs</h2>
+        <input type="file" id="fileInput" multiple accept=".pdf">
+        <button type="button" onclick="uploadFiles()">Upload</button>
+        <div id="uploadStatus"></div>
+    </div>
 
-        <div id="chatSection">
-            <h2>Chat with your Documents</h2>
-            <div id="chatBox"></div>
-            <input type="text" id="questionInput" placeholder="Ask a question..." style="width: 80%">
-            <button onclick="sendQuestion()">Send</button>
+    <div class="chat-section" id="chatSection">
+        <h2>Ask Questions</h2>
+        <div id="chatHistory"></div>
+        <div class="input-area">
+            <input type="text" id="questionInput" placeholder="Type your question here...">
+            <button type="button" onclick="askQuestion()">Send</button>
         </div>
     </div>
 
@@ -73,124 +89,106 @@
             const files = fileInput.files;
             
             if (files.length === 0) {
-                alert('Please select files to upload');
+                showError("Please select at least one PDF file");
                 return;
             }
 
             const formData = new FormData();
-            for (const file of files) {
+            for (let file of files) {
                 formData.append('files', file);
             }
 
             try {
-                document.getElementById('uploadStatus').innerHTML = 'Uploading files...';
-                
                 const response = await fetch('http://localhost:8000/uploadfiles/', {
                     method: 'POST',
                     body: formData
                 });
 
                 const result = await response.json();
+                console.log('Upload response:', result);
                 
                 if (response.ok) {
                     sessionId = result.session_id;
-                    document.getElementById('uploadStatus').innerHTML = 'Upload successful!';
-                    document.getElementById('uploadLoading').style.display = 'block';
-                    
-                    try {
-                        await connectWebSocket();
-                        document.getElementById('uploadSection').style.display = 'none';
-                        document.getElementById('chatSection').style.display = 'block';
-                    } catch (wsError) {
-                        document.getElementById('uploadStatus').innerHTML = 
-                            `WebSocket connection failed: ${wsError.message}. Please refresh and try again.`;
-                        document.getElementById('uploadLoading').style.display = 'none';
-                    }
-                } else {
+                    console.log('Received sessionId:', sessionId);
                     document.getElementById('uploadStatus').innerHTML = 
-                        `Upload failed: ${result.detail.message || 'Unknown error'}`;
+                        `Successfully uploaded ${result.files.length} file(s)`;
+                    
+                    // Show chat section and connect WebSocket
+                    document.getElementById('chatSection').style.display = 'block';
+                    connectWebSocket();
+                } else {
+                    showError(`Upload failed: ${result.detail.message}`);
                 }
             } catch (error) {
-                document.getElementById('uploadStatus').innerHTML = 
-                    `Error: ${error.message}`;
+                showError(`Error: ${error.message}`);
             }
         }
 
-        async function connectWebSocket() {
-            return new Promise((resolve, reject) => {
-                try {
-                    ws = new WebSocket(`ws://localhost:8000/ws/${sessionId}`);
-                    
-                    ws.onopen = () => {
-                        console.log('WebSocket connected');
-                        // Send a test message to verify connection
-                        ws.send('connection_test');
-                        // Don't resolve immediately, wait for first message
-                    };
+        function connectWebSocket() {
+            console.log('Attempting to connect WebSocket with sessionId:', sessionId);
+            ws = new WebSocket(`ws://localhost:8000/ws/${sessionId}`);
+            
+            ws.onopen = () => {
+                console.log('WebSocket connected successfully');
+            };
 
-                    ws.onmessage = (event) => {
-                        console.log('Received message:', event.data);
-                        if (!document.getElementById('chatSection').style.display) {
-                            // First message received, connection is stable
-                            resolve();
-                        }
-                        addMessage(event.data, 'ai');
-                    };
+            ws.onmessage = (event) => {
+                console.log('Received message:', event.data);
+                addMessage(event.data, 'answer');
+            };
 
-                    ws.onclose = () => {
-                        console.log('WebSocket disconnected');
-                        if (!document.getElementById('chatSection').style.display) {
-                            reject(new Error('Connection closed before initialization'));
-                        } else {
-                            // Connection was previously established but now closed
-                            document.getElementById('chatSection').innerHTML += 
-                                '<div class="error-message">Connection lost. Please refresh the page.</div>';
-                        }
-                    };
-
-                    ws.onerror = (error) => {
-                        console.error('WebSocket error:', error);
-                        reject(new Error('Failed to establish connection'));
-                    };
-
-                    // Add timeout for connection
-                    setTimeout(() => {
-                        if (ws.readyState !== WebSocket.OPEN) {
-                            ws.close();
-                            reject(new Error('Connection timeout'));
-                        }
-                    }, 5000);
-                } catch (error) {
-                    reject(error);
+            ws.onclose = (event) => {
+                console.log('WebSocket disconnected', {
+                    code: event.code,
+                    reason: event.reason,
+                    wasClean: event.wasClean
+                });
+                if (event.code === 1008) {
+                    showError("Please upload documents first");
                 }
-            });
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
         }
 
-        function sendQuestion() {
+        function askQuestion() {
             const questionInput = document.getElementById('questionInput');
             const question = questionInput.value.trim();
             
             if (question && ws && ws.readyState === WebSocket.OPEN) {
-                addMessage(question, 'user');
                 ws.send(question);
+                addMessage(question, 'question');
                 questionInput.value = '';
             }
         }
 
-        function addMessage(message, sender) {
-            const chatBox = document.getElementById('chatBox');
+        function addMessage(message, type) {
+            const chatHistory = document.getElementById('chatHistory');
             const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${sender}-message`;
+            messageDiv.className = type;
             messageDiv.textContent = message;
-            chatBox.appendChild(messageDiv);
-            chatBox.scrollTop = chatBox.scrollHeight;
+            chatHistory.appendChild(messageDiv);
+            chatHistory.scrollTop = chatHistory.scrollHeight;
         }
 
-        // Allow sending questions with Enter key
+        function showError(message) {
+            const statusDiv = document.getElementById('uploadStatus');
+            statusDiv.innerHTML = `<div class="error">${message}</div>`;
+        }
+
+        // Add enter key support for sending questions
         document.getElementById('questionInput').addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
-                sendQuestion();
+                e.preventDefault();
+                askQuestion();
             }
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // Removed form submission prevention since there's no form
+            // If a form exists, ensure it's handled appropriately
         });
     </script>
 </body>

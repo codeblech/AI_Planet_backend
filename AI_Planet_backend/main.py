@@ -7,12 +7,10 @@ import redis.asyncio as redis
 from contextlib import asynccontextmanager
 from fastapi_limiter import FastAPILimiter
 from fastapi_limiter.depends import RateLimiter
-import os
 from pathlib import Path
 import uuid
 import aiofiles
 from typing import Dict, Set
-import json
 import sys
 
 MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB in bytes
@@ -39,13 +37,18 @@ class ConnectionManager:
         self.active_connections: Dict[str, WebSocket] = {}
         # Store session IDs that are allowed to connect (users who have uploaded docs)
         self.authorized_sessions: Set[str] = set()
+        print("Authorized sessions:", self.authorized_sessions)  # Debug line
 
     async def connect(self, websocket: WebSocket, session_id: str):
+        print(f"Attempting to connect session {session_id}")  # Debug line
+        print(f"Authorized sessions: {self.authorized_sessions}")  # Debug line
         if session_id not in self.authorized_sessions:
+            print(f"Session {session_id} not authorized")  # Debug line
             await websocket.close(code=1008, reason="Upload documents first")
             return False
         await websocket.accept()
         self.active_connections[session_id] = websocket
+        print(f"Successfully connected session {session_id}")  # Debug line
         return True
 
     async def disconnect(self, session_id: str):
@@ -58,6 +61,7 @@ class ConnectionManager:
 
     def authorize_session(self, session_id: str):
         self.authorized_sessions.add(session_id)
+        print(f"Authorized new session: {session_id}")  # Debug line
 
 manager = ConnectionManager()
 
@@ -74,7 +78,8 @@ origins = [
     "http://localhost",
     "http://localhost:8080",
     "http://localhost:5500",
-    "http://127.0.0.1:5500"
+    "http://127.0.0.1:5500",
+    "http://0.0.0.0:9000",
 ]
 
 app.add_middleware(
@@ -192,13 +197,13 @@ async def main():
 
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    # Attempt to connect (will fail if session is not authorized)
-    is_connected = await manager.connect(websocket, session_id)
-    
-    if not is_connected:
-        return
-
     try:
+        # Attempt to connect (will fail if session is not authorized)
+        is_connected = await manager.connect(websocket, session_id)
+        
+        if not is_connected:
+            return
+
         while True:
             # Receive question from client
             question = await websocket.receive_text()
@@ -210,4 +215,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             await manager.send_message(response, session_id)
             
     except WebSocketDisconnect:
+        await manager.disconnect(session_id)
+    finally:
+        # Ensure we clean up the connection if anything goes wrong
         await manager.disconnect(session_id)
