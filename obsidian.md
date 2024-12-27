@@ -48,6 +48,16 @@ https://python.langchain.com/docs/how_to/document_loader_pdf/
 https://python.langchain.com/docs/tutorials/chatbot/
 
 
+### LangChain bad
+This is my third time trying to use LangChain. Now I've come to the conclusion that it is not worth the hassle. It is much simpler to implement the AI stuff without it. I tried to use LangChain for the pdf processing, but this library somehow manages to break every single thing it aims to optimize. 
+Further, it has a lot of dependencies and bloat which make it totally unsuitable for production.
+
+### LlamaIndex?
+The docs are horrible. And the library suffers from the same problems as LangChain. Too much abstraction. 
+
+### But the requirement says to use LangChain/LlamaIndex
+I tried to come up with the best solution in the limited time constraint. In a case where some infra is already setup in LangChain/LlamaIndex, I would've used it.
+
 ### ephemeral document storage
 once some kind of user auth is implemented we can make the document storage persistent. But since the current requirement does not mention user auth, we'll just delete the files after the user disconnects.
 
@@ -57,3 +67,7 @@ in case that the client uploads files, but doesn't establish the websocket conne
 
 ### background tasks
 converting pdfs to text and storing them in the vector database can be done in the background. This is because the user is not waiting for the pdfs to be converted and stored, and the conversion and storage is not the main functionality of the app.
+
+
+### UI
+show in the ui that pdfs and questions are being processed. But that's not the part of the requirement.
