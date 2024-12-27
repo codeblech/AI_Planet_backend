@@ -37,9 +37,20 @@ if frontend is served from a live server like that in vscode, then it must be ma
 ### extracting only text
 as the requirement says.
 
+#### langchain docs
+> A note on multimodal models
+> Many modern LLMs support inference over multimodal inputs (e.g., images). In some applications -- such as question-answering over PDFs with complex layouts, diagrams, or scans -- it may be advantageous to skip the PDF parsing, instead casting a PDF page to an image and passing it to a model directly.
+
+### For more granular control over pdf parsing
+https://python.langchain.com/docs/how_to/document_loader_pdf/
+
+### LangChain chatbot tutorial
+https://python.langchain.com/docs/tutorials/chatbot/
+
 
 ### ephemeral document storage
 once some kind of user auth is implemented we can make the document storage persistent. But since the current requirement does not mention user auth, we'll just delete the files after the user disconnects.
 
 ### periodic cleanup up uploads folder
 in case that the client uploads files, but doesn't establish the websocket connection, the uploaded documents remain saved. These can be later deleted using a periodic cleanup task, which can be easily implemented using a cron job.
+
