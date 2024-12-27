@@ -2,7 +2,7 @@ Models
 ======
 
 PDF Upload Models
-----------------
+--------------------
 
 .. automodule:: app.models.pdf_upload
    :members:
@@ -10,7 +10,7 @@ PDF Upload Models
    :show-inheritance:
 
 Response Models
--------------
+-----------------
 
 .. automodule:: app.models.responses
    :members:

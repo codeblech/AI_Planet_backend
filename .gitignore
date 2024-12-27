@@ -8,3 +8,4 @@ __pycache__
 *.pdf
 *.sqlite3
 *.bin
+docs/build/
