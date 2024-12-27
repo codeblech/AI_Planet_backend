@@ -54,3 +54,6 @@ once some kind of user auth is implemented we can make the document storage pers
 ### periodic cleanup up uploads folder
 in case that the client uploads files, but doesn't establish the websocket connection, the uploaded documents remain saved. These can be later deleted using a periodic cleanup task, which can be easily implemented using a cron job.
 
+
+### background tasks
+converting pdfs to text and storing them in the vector database can be done in the background. This is because the user is not waiting for the pdfs to be converted and stored, and the conversion and storage is not the main functionality of the app.
