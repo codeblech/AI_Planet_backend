@@ -17,6 +17,10 @@ python -m http.server 9000
 ```
 > This frontend is currently configured to with with locally hosted backend. It can be changed to use the deployed backend by changing the url in the fetch requrests.
 
+
+## Demo
+https://github.com/codeblech/AI_Planet_backend/raw/refs/heads/main/screenshots/vid.mp4
+
 ## Core Features
 
 - PDF upload endpoint with file validation and metadata storage
