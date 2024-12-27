@@ -10,6 +10,19 @@ load_dotenv()
 
 
 class PDFProcessor:
+    """
+    A service class for processing PDF documents and handling Q&A interactions.
+
+    This class manages the integration with Google's Gemini AI and ChromaDB for
+    document processing and question answering capabilities.
+
+    Attributes:
+        embedding_model (str): The name of the text embedding model
+        llm (GenerativeModel): Instance of Gemini AI model
+        chroma_client (chromadb.Client): ChromaDB client for vector storage
+        collections (Dict[str, chromadb.Collection]): Dictionary of active collections
+    """
+
     def __init__(self):
         # Initialize Gemini
         genai.configure(api_key=os.environ["GEMINI_API_KEY"])
@@ -19,7 +32,6 @@ class PDFProcessor:
         # Initialize ChromaDB
         self.chroma_client = chromadb.Client()
         
-        # Create or get collections for each session
         self.collections: Dict[str, chromadb.Collection] = {}
 
     def _extract_text_from_pdf(self, pdf_path: Path) -> str:
@@ -31,7 +43,16 @@ class PDFProcessor:
         return text.strip()
 
     async def process_pdfs(self, session_id: str, pdf_paths: List[Path]) -> None:
-        """Process multiple PDFs for a session"""
+        """
+        Process multiple PDFs for a session and store their contents in ChromaDB.
+
+        Args:
+            session_id (str): Unique identifier for the session
+            pdf_paths (List[Path]): List of paths to PDF files
+
+        Returns:
+            None
+        """
         # Create a new collection for this session
         collection = self.chroma_client.create_collection(name=session_id)
         self.collections[session_id] = collection
@@ -47,7 +68,16 @@ class PDFProcessor:
             )
 
     async def get_answer(self, session_id: str, question: str) -> str:
-        """Get answer for a question using the processed PDFs"""
+        """
+        Generate an answer for a question using the processed PDFs.
+
+        Args:
+            session_id (str): Session identifier to retrieve relevant documents
+            question (str): User's question
+
+        Returns:
+            str: Generated answer based on the document context
+        """
         if session_id not in self.collections:
             return "No documents found for this session. Please upload PDFs first."
         

@@ -22,7 +22,6 @@ async def lifespan(app: FastAPI):
 def create_app():
     app = FastAPI(lifespan=lifespan)
     
-    # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
         allow_origins=CORS_ORIGINS,
@@ -34,7 +33,6 @@ def create_app():
     # Create database tables
     Base.metadata.create_all(bind=engine)
     
-    # Include routers
     app.include_router(upload.router)
     app.include_router(websocket.router)
     

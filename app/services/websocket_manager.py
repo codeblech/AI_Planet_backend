@@ -2,12 +2,34 @@ from typing import Dict, Set
 from fastapi import WebSocket
 
 class WebSocketConnectionManager:
+    """
+    Manages WebSocket connections and session authorization.
+
+    This class handles the lifecycle of WebSocket connections, including
+    authorization, connection management, and message distribution.
+
+    Attributes:
+        active_websocket_connections (Dict[str, WebSocket]): Active WebSocket connections
+        authorized_upload_sessions (Set[str]): Set of authorized session IDs
+        established_websocket_sessions (Set[str]): Set of established WebSocket sessions
+    """
+
     def __init__(self):
         self.active_websocket_connections: Dict[str, WebSocket] = {}
         self.authorized_upload_sessions: Set[str] = set()
         self.established_websocket_sessions: Set[str] = set()
 
-    async def connect_websocket(self, websocket: WebSocket, session_id: str):
+    async def connect_websocket(self, websocket: WebSocket, session_id: str) -> bool:
+        """
+        Establish a WebSocket connection for an authorized session.
+
+        Args:
+            websocket (WebSocket): The WebSocket connection instance
+            session_id (str): Session identifier
+
+        Returns:
+            bool: True if connection was successful, False otherwise
+        """
         print(f"Attempting to connect session {session_id}")
         print(f"Authorized sessions: {self.authorized_upload_sessions}")
         if session_id not in self.authorized_upload_sessions:

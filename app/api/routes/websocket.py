@@ -12,6 +12,16 @@ from ...services.pdf_processor import PDFProcessor
 router = APIRouter()
 
 async def cleanup_session_pdf_files(session_id: str, db: Session):
+    """
+    Clean up PDF files associated with a specific session.
+
+    Args:
+        session_id (str): The unique identifier for the session
+        db (Session): SQLAlchemy database session
+
+    This function removes both the physical PDF files from storage
+    and their corresponding database entries.
+    """
     # Get all files for this session
     files = db.query(PDFFileUpload).filter(PDFFileUpload.session_id == session_id).all()
     
@@ -30,6 +40,24 @@ async def cleanup_session_pdf_files(session_id: str, db: Session):
 
 @router.websocket("/ws/{session_id}")
 async def pdf_qa_websocket_endpoint(websocket: WebSocket, session_id: str, db: Session = Depends(get_db)):
+    """
+    WebSocket endpoint for PDF question-answering functionality.
+
+    Args:
+        websocket (WebSocket): The WebSocket connection instance
+        session_id (str): Unique identifier for the client session
+        db (Session): SQLAlchemy database session dependency
+
+    This endpoint handles:
+        - WebSocket connection management
+        - PDF file processing for the session
+        - Question-answering interactions
+        - Rate limiting (except in test environment)
+        - Cleanup of resources on disconnect
+
+    Raises:
+        WebSocketDisconnect: When the client disconnects from the WebSocket
+    """
     try:
         is_connected = await websocket_manager.connect_websocket(websocket, session_id)
         

@@ -953,9 +953,6 @@ pygments==2.18.0 ; python_version >= "3.12" and python_version < "4.0" \
 pyparsing==3.2.0 ; python_version >= "3.12" and python_version < "4.0" \
     --hash=sha256:93d9577b88da0bbea8cc8334ee8b918ed014968fd2ec383e868fb8afb1ccef84 \
     --hash=sha256:cbf74e27246d595d9a74b186b810f6fbb86726dbf3b9532efb343f6d7294fe9c
-pypdf2==3.0.1 ; python_version >= "3.12" and python_version < "4.0" \
-    --hash=sha256:a74408f69ba6271f71b9352ef4ed03dc53a31aa404d29b5d31f53bfecfee1440 \
-    --hash=sha256:d16e4205cfee272fbdc0568b68d82be796540b1537508cef59388f839c191928
 pypdf==5.1.0 ; python_version >= "3.12" and python_version < "4.0" \
     --hash=sha256:3bd4f503f4ebc58bae40d81e81a9176c400cbbac2ba2d877367595fb524dfdfc \
     --hash=sha256:425a129abb1614183fd1aca6982f650b47f8026867c0ce7c4b9f281c443d2740

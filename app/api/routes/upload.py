@@ -17,6 +17,13 @@ from fastapi_limiter.depends import RateLimiter
 router = APIRouter()
 
 def get_upload_rate_limit_dependency():
+    """
+    Creates rate limiting dependency for upload endpoints.
+    
+    Returns:
+        list: List of FastAPI dependencies containing rate limiter if not in test environment,
+              empty list otherwise.
+    """
     if "pytest" not in sys.modules:
         return [Depends(RateLimiter(times=5, seconds=60))]
     return []
@@ -26,6 +33,43 @@ async def create_upload_files(
     files: Annotated[list[UploadFile], File(description="Multiple files as UploadFile")],
     db: Session = Depends(get_db),
 ):
+    """
+    Handle multiple file uploads, storing files and their metadata.
+
+    Args:
+        files (list[UploadFile]): List of files to upload
+        db (Session): Database session dependency
+
+    Returns:
+        dict: Response containing:
+            - files (list): Successfully uploaded files with original and saved names
+            - errors (list, optional): Any errors that occurred during upload
+            - session_id (str): Unique session ID for WebSocket communication
+
+    Raises:
+        HTTPException: When no files are successfully uploaded
+        FileUploadError: When file upload fails
+        FileSizeError: When file size exceeds limit
+        FileTypeError: When file type is not PDF
+
+    Example:
+        Response format:
+        {
+            "files": [
+                {
+                    "original_name": "example.pdf",
+                    "saved_name": "example_uuid.pdf"
+                }
+            ],
+            "session_id": "uuid-string",
+            "errors": [  # optional
+                {
+                    "filename": "invalid.txt",
+                    "error": "Invalid file type"
+                }
+            ]
+        }
+    """
     saved_files = []
     errors = []
     session_id = str(uuid.uuid4())
@@ -118,6 +162,12 @@ async def create_upload_files(
 
 @router.get("/")
 async def main():
+    """
+    Render simple HTML upload form for testing.
+
+    Returns:
+        HTMLResponse: Basic HTML form for file uploads
+    """
     content = """
     <body>
     <form action="/uploadfiles/" enctype="multipart/form-data" method="post">
