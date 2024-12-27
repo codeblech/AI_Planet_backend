@@ -8,6 +8,8 @@ from fastapi_limiter import FastAPILimiter
 import redis.asyncio as redis
 import pytest_asyncio
 from sqlalchemy.orm import Session
+from main import FileUpload, SessionLocal, Base, engine
+import shutil
 
 client = TestClient(app)
 
@@ -131,3 +133,142 @@ def test_rate_limiting():
     
     # The last request should return 422 since we're not sending any files
     assert response.status_code == 422 
+
+@pytest.fixture(scope="function")
+def test_db():
+    # Create test database tables
+    Base.metadata.create_all(bind=engine)
+    
+    # Get a test database session
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+        # Clean up the database after each test
+        Base.metadata.drop_all(bind=engine)
+
+@pytest.fixture(scope="function")
+def cleanup_uploads():
+    # Setup: ensure upload directory exists
+    UPLOAD_DIR.mkdir(exist_ok=True)
+    
+    yield
+    
+    # Cleanup: remove all files in upload directory
+    shutil.rmtree(UPLOAD_DIR)
+    UPLOAD_DIR.mkdir(exist_ok=True)
+
+def test_database_file_upload(test_db, sample_pdf, cleanup_uploads):
+    """Test database entry creation when uploading files"""
+    with open(sample_pdf, "rb") as f:
+        files = {"files": ("test.pdf", f, "application/pdf")}
+        response = client.post("/uploadfiles/", files=files)
+    
+    assert response.status_code == 200
+    session_id = response.json()["session_id"]
+    
+    # Check database entry
+    db_file = test_db.query(FileUpload).filter(FileUpload.session_id == session_id).first()
+    assert db_file is not None
+    assert db_file.original_filename == "test.pdf"
+    assert db_file.content_type == "application/pdf"
+    assert db_file.session_id == session_id
+
+def test_file_cleanup_after_websocket_disconnect(test_db, sample_pdf, cleanup_uploads):
+    """Test that files are cleaned up after WebSocket disconnection"""
+    # First upload a file
+    with open(sample_pdf, "rb") as f:
+        files = {"files": ("test.pdf", f, "application/pdf")}
+        response = client.post("/uploadfiles/", files=files)
+    
+    session_id = response.json()["session_id"]
+    saved_filename = response.json()["files"][0]["saved_name"]
+    
+    # Verify file exists in database and filesystem
+    assert test_db.query(FileUpload).filter(FileUpload.session_id == session_id).count() == 1
+    assert (UPLOAD_DIR / saved_filename).exists()
+    
+    # Connect and disconnect WebSocket
+    with client.websocket_connect(f"/ws/{session_id}") as websocket:
+        websocket.send_text("Test question")
+        response = websocket.receive_text()
+        assert "placeholder response" in response
+    
+    # Verify file is deleted from both database and filesystem
+    assert test_db.query(FileUpload).filter(FileUpload.session_id == session_id).count() == 0
+    assert not (UPLOAD_DIR / saved_filename).exists()
+
+def test_files_persist_without_websocket_connection(test_db, sample_pdf, cleanup_uploads):
+    """Test that files remain when no WebSocket connection is made"""
+    # Upload a file
+    with open(sample_pdf, "rb") as f:
+        files = {"files": ("test.pdf", f, "application/pdf")}
+        response = client.post("/uploadfiles/", files=files)
+    
+    session_id = response.json()["session_id"]
+    saved_filename = response.json()["files"][0]["saved_name"]
+    
+    # Verify file exists
+    assert test_db.query(FileUpload).filter(FileUpload.session_id == session_id).count() == 1
+    assert (UPLOAD_DIR / saved_filename).exists()
+    
+    # Don't connect WebSocket
+    # Wait a moment to ensure no automatic cleanup
+    import time
+    time.sleep(1)
+    
+    # Verify file still exists
+    assert test_db.query(FileUpload).filter(FileUpload.session_id == session_id).count() == 1
+    assert (UPLOAD_DIR / saved_filename).exists()
+
+def test_multiple_file_cleanup(test_db, sample_pdf, cleanup_uploads):
+    """Test cleanup of multiple files for same session"""
+    # Upload multiple files
+    with open(sample_pdf, "rb") as f1, open(sample_pdf, "rb") as f2:
+        files = [
+            ("files", ("test1.pdf", f1, "application/pdf")),
+            ("files", ("test2.pdf", f2, "application/pdf"))
+        ]
+        response = client.post("/uploadfiles/", files=files)
+    
+    session_id = response.json()["session_id"]
+    saved_filenames = [file["saved_name"] for file in response.json()["files"]]
+    
+    # Verify files exist
+    assert test_db.query(FileUpload).filter(FileUpload.session_id == session_id).count() == 2
+    for filename in saved_filenames:
+        assert (UPLOAD_DIR / filename).exists()
+    
+    # Connect and disconnect WebSocket
+    with client.websocket_connect(f"/ws/{session_id}") as websocket:
+        websocket.send_text("Test question")
+        response = websocket.receive_text()
+    
+    # Verify all files are cleaned up
+    assert test_db.query(FileUpload).filter(FileUpload.session_id == session_id).count() == 0
+    for filename in saved_filenames:
+        assert not (UPLOAD_DIR / filename).exists()
+
+def test_connection_manager_state(test_db, sample_pdf, cleanup_uploads):
+    """Test ConnectionManager state management"""
+    # Upload a file
+    with open(sample_pdf, "rb") as f:
+        files = {"files": ("test.pdf", f, "application/pdf")}
+        response = client.post("/uploadfiles/", files=files)
+    
+    session_id = response.json()["session_id"]
+    
+    # Verify session is authorized
+    assert session_id in manager.authorized_sessions
+    assert session_id not in manager.connected_sessions
+    
+    # Connect WebSocket
+    with client.websocket_connect(f"/ws/{session_id}") as websocket:
+        # Verify session is connected
+        assert session_id in manager.connected_sessions
+        assert session_id in manager.active_connections
+    
+    # After disconnection, verify session is removed from tracking
+    assert session_id not in manager.active_connections
+    assert session_id not in manager.connected_sessions 

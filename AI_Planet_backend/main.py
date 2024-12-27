@@ -13,9 +13,9 @@ import aiofiles
 from typing import Dict, Set
 import sys
 from sqlalchemy import create_engine, Column, String, DateTime, Integer
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import sessionmaker, Session
-from datetime import datetime
+from datetime import datetime, UTC
 
 MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB in bytes
 UPLOAD_DIR = Path("uploads")
@@ -41,6 +41,8 @@ class ConnectionManager:
         self.active_connections: Dict[str, WebSocket] = {}
         # Store session IDs that are allowed to connect (users who have uploaded docs)
         self.authorized_sessions: Set[str] = set()
+        # Add tracking of sessions that have established WebSocket connections
+        self.connected_sessions: Set[str] = set()
         print("Authorized sessions:", self.authorized_sessions)  # Debug line
 
     async def connect(self, websocket: WebSocket, session_id: str):
@@ -52,12 +54,15 @@ class ConnectionManager:
             return False
         await websocket.accept()
         self.active_connections[session_id] = websocket
+        # Track that this session has established a WebSocket connection
+        self.connected_sessions.add(session_id)
         print(f"Successfully connected session {session_id}")  # Debug line
         return True
 
     async def disconnect(self, session_id: str):
         if session_id in self.active_connections:
             del self.active_connections[session_id]
+            # Don't remove from connected_sessions as we need this for cleanup
 
     async def send_message(self, message: str, session_id: str):
         if session_id in self.active_connections:
@@ -104,7 +109,10 @@ def get_rate_limit_dependency():
 DATABASE_URL = "sqlite:///./sql_app.db"
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+
+# Replace declarative_base() with a class that inherits from DeclarativeBase
+class Base(DeclarativeBase):
+    pass
 
 # Add File model
 class FileUpload(Base):
@@ -113,8 +121,8 @@ class FileUpload(Base):
     id = Column(Integer, primary_key=True, index=True)
     original_filename = Column(String)
     saved_filename = Column(String, unique=True)
-    file_size = Column(Integer)  # in bytes
-    upload_datetime = Column(DateTime, default=datetime.utcnow)
+    file_size = Column(Integer)
+    upload_datetime = Column(DateTime, default=lambda: datetime.now(UTC))
     session_id = Column(String)
     content_type = Column(String)
 
@@ -128,6 +136,23 @@ def get_db():
         yield db
     finally:
         db.close()
+
+# Add new helper function for file cleanup
+async def cleanup_session_files(session_id: str, db: Session):
+    # Get all files for this session
+    files = db.query(FileUpload).filter(FileUpload.session_id == session_id).all()
+    
+    # Delete each file
+    for file in files:
+        file_path = UPLOAD_DIR / file.saved_filename
+        try:
+            if file_path.exists():
+                file_path.unlink()  # Delete the file
+            db.delete(file)  # Remove database entry
+        except Exception as e:
+            print(f"Error deleting file {file.saved_filename}: {e}")
+    
+    db.commit()
 
 @app.post("/uploadfiles/", dependencies=get_rate_limit_dependency())
 async def create_upload_files(
@@ -240,7 +265,7 @@ async def main():
 
 
 @app.websocket("/ws/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str):
+async def websocket_endpoint(websocket: WebSocket, session_id: str, db: Session = Depends(get_db)):
     try:
         # Attempt to connect (will fail if session is not authorized)
         is_connected = await manager.connect(websocket, session_id)
@@ -260,6 +285,10 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             
     except WebSocketDisconnect:
         await manager.disconnect(session_id)
+        # Clean up files only if this session had established a connection
+        if session_id in manager.connected_sessions:
+            await cleanup_session_files(session_id, db)
+            manager.connected_sessions.remove(session_id)
     finally:
         # Ensure we clean up the connection if anything goes wrong
         await manager.disconnect(session_id)
