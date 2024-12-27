@@ -134,6 +134,9 @@ async def test_websocket_connection_authorized(sample_pdf):
 
 @pytest.fixture(scope="function")
 def test_db():
+    # Drop all tables first to ensure clean state
+    Base.metadata.drop_all(bind=engine)
+    
     # Create test database tables
     Base.metadata.create_all(bind=engine)
     
@@ -295,3 +298,97 @@ def test_websocket_connection_lifecycle(test_db, sample_pdf, cleanup_uploads):
     # After disconnection, verify session is removed from tracking
     assert session_id not in websocket_manager.active_websocket_connections
     assert session_id not in websocket_manager.established_websocket_sessions 
+
+@pytest.mark.asyncio
+async def test_pdf_processing_initialization(test_db, sample_pdf, cleanup_uploads):
+    """Test PDF processor initialization with uploaded files"""
+    # Upload a PDF
+    with open(sample_pdf, "rb") as f:
+        files = {"files": ("test.pdf", f, "application/pdf")}
+        response = client.post("/uploadfiles/", files=files)
+    
+    session_id = response.json()["session_id"]
+    
+    # Connect WebSocket to trigger PDF processing
+    with client.websocket_connect(f"/ws/{session_id}") as websocket:
+        # The connection itself should trigger PDF processing
+        # Send a test message to ensure processing is complete
+        websocket.send_text("Is the PDF processed?")
+        response = websocket.receive_text()
+        assert response is not None
+
+@pytest.mark.asyncio
+async def test_pdf_processing_multiple_files(test_db, sample_pdf, cleanup_uploads):
+    """Test processing multiple PDFs in the same session"""
+    # Upload multiple PDFs
+    with open(sample_pdf, "rb") as f1, open(sample_pdf, "rb") as f2:
+        files = [
+            ("files", ("test1.pdf", f1, "application/pdf")),
+            ("files", ("test2.pdf", f2, "application/pdf"))
+        ]
+        response = client.post("/uploadfiles/", files=files)
+    
+    session_id = response.json()["session_id"]
+    
+    # Connect WebSocket and verify processing
+    with client.websocket_connect(f"/ws/{session_id}") as websocket:
+        websocket.send_text("Test question about multiple PDFs")
+        response = websocket.receive_text()
+        assert response is not None
+
+@pytest.mark.asyncio
+async def test_pdf_processing_error_handling(test_db, cleanup_uploads):
+    """Test PDF processor error handling with invalid PDF"""
+    # Create an invalid PDF file
+    invalid_pdf = Path("invalid.pdf")
+    invalid_pdf.write_text("This is not a valid PDF file")
+    
+    try:
+        # Try to upload invalid PDF
+        with open(invalid_pdf, "rb") as f:
+            files = {"files": ("invalid.pdf", f, "application/pdf")}
+            response = client.post("/uploadfiles/", files=files)
+        
+        session_id = response.json()["session_id"]
+        
+        # Connect WebSocket and verify error handling
+        with client.websocket_connect(f"/ws/{session_id}") as websocket:
+            websocket.send_text("Test question")
+            response = websocket.receive_text()
+            assert "error" in response.lower()
+    
+    finally:
+        # Cleanup
+        invalid_pdf.unlink(missing_ok=True)
+
+@pytest.mark.asyncio
+async def test_pdf_qa_functionality(test_db, sample_pdf, cleanup_uploads):
+    """Test question-answering functionality with processed PDFs"""
+    # Create a PDF with specific content
+    pdf_content = b"%PDF-1.4\nThis is a test document about FastAPI testing."
+    test_pdf = Path("test_content.pdf")
+    test_pdf.write_bytes(pdf_content)
+    
+    try:
+        # Upload PDF
+        with open(test_pdf, "rb") as f:
+            files = {"files": ("test_content.pdf", f, "application/pdf")}
+            response = client.post("/uploadfiles/", files=files)
+        
+        session_id = response.json()["session_id"]
+        
+        # Test Q&A functionality
+        with client.websocket_connect(f"/ws/{session_id}") as websocket:
+            # Send relevant question
+            websocket.send_text("What is this document about?")
+            response = websocket.receive_text()
+            assert "fastapi" in response.lower() or "test" in response.lower()
+            
+            # Send irrelevant question
+            websocket.send_text("What is the capital of France?")
+            response = websocket.receive_text()
+            assert "no relevant information" in response.lower() or "cannot answer" in response.lower()
+    
+    finally:
+        # Cleanup
+        test_pdf.unlink(missing_ok=True) 

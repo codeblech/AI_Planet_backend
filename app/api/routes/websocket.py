@@ -7,6 +7,7 @@ from fastapi_limiter.depends import WebSocketRateLimiter
 from pathlib import Path
 from ...models.pdf_upload import PDFFileUpload
 from ...config import UPLOAD_DIR
+from ...services.pdf_processor import PDFProcessor
 
 router = APIRouter()
 
@@ -35,9 +36,19 @@ async def pdf_qa_websocket_endpoint(websocket: WebSocket, session_id: str, db: S
         if not is_connected:
             return
 
+        # Initialize PDF processor
+        pdf_processor = PDFProcessor()
+        
+        # Get PDF files for this session
+        pdf_files = db.query(PDFFileUpload).filter(PDFFileUpload.session_id == session_id).all()
+        pdf_paths = [UPLOAD_DIR / file.saved_filename for file in pdf_files]
+        
+        # Process PDFs
+        await pdf_processor.process_pdfs(session_id, pdf_paths)
+        
         # Only apply rate limiting if not in test environment
         if "pytest" not in sys.modules:
-            ratelimit = WebSocketRateLimiter(times=10, seconds=60)  # 10 messages per minute
+            ratelimit = WebSocketRateLimiter(times=10, seconds=60)
         
         try:
             while True:
@@ -47,15 +58,19 @@ async def pdf_qa_websocket_endpoint(websocket: WebSocket, session_id: str, db: S
                 if "pytest" not in sys.modules:
                     await ratelimit(websocket, context_key=session_id)
                 
-                response = "This is a placeholder response. The actual PDF-based Q&A will be implemented later."
+                # Get answer from PDF processor
+                response = await pdf_processor.get_answer(session_id, question)
                 await websocket_manager.send_websocket_message(response, session_id)
+                
         except WebSocketDisconnect:
-            raise  # Re-raise to be caught by outer try block
+            raise
             
     except WebSocketDisconnect:
         await websocket_manager.disconnect_websocket(session_id)
-        # Clean up files only if this session had established a connection
         if session_id in websocket_manager.established_websocket_sessions:
+            # Clean up PDF processor resources
+            pdf_processor.cleanup_session(session_id)
+            # Clean up files
             await cleanup_session_pdf_files(session_id, db)
             websocket_manager.established_websocket_sessions.remove(session_id)
             websocket_manager.authorized_upload_sessions.remove(session_id)
