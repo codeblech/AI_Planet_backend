@@ -35,44 +35,40 @@ class FileTypeError(FileUploadError):
     pass
 
 # Add connection manager class
-class ConnectionManager:
+class WebSocketConnectionManager:
     def __init__(self):
-        # Store active connections and their associated document IDs
-        self.active_connections: Dict[str, WebSocket] = {}
-        # Store session IDs that are allowed to connect (users who have uploaded docs)
-        self.authorized_sessions: Set[str] = set()
-        # Add tracking of sessions that have established WebSocket connections
-        self.connected_sessions: Set[str] = set()
-        print("Authorized sessions:", self.authorized_sessions)  # Debug line
+        self.active_websocket_connections: Dict[str, WebSocket] = {}
+        self.authorized_upload_sessions: Set[str] = set()
+        self.established_websocket_sessions: Set[str] = set()
 
-    async def connect(self, websocket: WebSocket, session_id: str):
+    async def connect_websocket(self, websocket: WebSocket, session_id: str):
         print(f"Attempting to connect session {session_id}")  # Debug line
-        print(f"Authorized sessions: {self.authorized_sessions}")  # Debug line
-        if session_id not in self.authorized_sessions:
+        print(f"Authorized sessions: {self.authorized_upload_sessions}")  # Debug line
+        if session_id not in self.authorized_upload_sessions:
             print(f"Session {session_id} not authorized")  # Debug line
             await websocket.close(code=1008, reason="Upload documents first")
             return False
         await websocket.accept()
-        self.active_connections[session_id] = websocket
+        self.active_websocket_connections[session_id] = websocket
         # Track that this session has established a WebSocket connection
-        self.connected_sessions.add(session_id)
+        self.established_websocket_sessions.add(session_id)
         print(f"Successfully connected session {session_id}")  # Debug line
         return True
 
-    async def disconnect(self, session_id: str):
-        if session_id in self.active_connections:
-            del self.active_connections[session_id]
-            # Don't remove from connected_sessions as we need this for cleanup
+    async def disconnect_websocket(self, session_id: str):
+        if session_id in self.active_websocket_connections:
+            del self.active_websocket_connections[session_id]
+            # Don't remove from established_websocket_sessions as we need this for cleanup
 
-    async def send_message(self, message: str, session_id: str):
-        if session_id in self.active_connections:
-            await self.active_connections[session_id].send_text(message)
+    async def send_websocket_message(self, message: str, session_id: str):
+        if session_id in self.active_websocket_connections:
+            await self.active_websocket_connections[session_id].send_text(message)
 
-    def authorize_session(self, session_id: str):
-        self.authorized_sessions.add(session_id)
+    def authorize_upload_session(self, session_id: str):
+        self.authorized_upload_sessions.add(session_id)
         print(f"Authorized new session: {session_id}")  # Debug line
 
-manager = ConnectionManager()
+websocket_manager = WebSocketConnectionManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -115,8 +111,8 @@ class Base(DeclarativeBase):
     pass
 
 # Add File model
-class FileUpload(Base):
-    __tablename__ = "file_uploads"
+class PDFFileUpload(Base):
+    __tablename__ = "pdf_file_uploads"
 
     id = Column(Integer, primary_key=True, index=True)
     original_filename = Column(String)
@@ -138,9 +134,9 @@ def get_db():
         db.close()
 
 # Add new helper function for file cleanup
-async def cleanup_session_files(session_id: str, db: Session):
+async def cleanup_session_pdf_files(session_id: str, db: Session):
     # Get all files for this session
-    files = db.query(FileUpload).filter(FileUpload.session_id == session_id).all()
+    files = db.query(PDFFileUpload).filter(PDFFileUpload.session_id == session_id).all()
     
     # Delete each file
     for file in files:
@@ -203,7 +199,7 @@ async def create_upload_files(
                 raise FileUploadError(file.filename, f"Failed to save file: {str(e)}")
             
             # After successful file save, store metadata in database
-            file_upload = FileUpload(
+            file_upload = PDFFileUpload(
                 original_filename=file.filename,
                 saved_filename=unique_filename,
                 file_size=file_size,
@@ -244,7 +240,7 @@ async def create_upload_files(
         
     if saved_files:
         # Authorize this session for WebSocket connections
-        manager.authorize_session(session_id)
+        websocket_manager.authorize_upload_session(session_id)
         # Add session_id to the response
         response["session_id"] = session_id
 
@@ -265,10 +261,10 @@ async def main():
 
 
 @app.websocket("/ws/{session_id}")
-async def websocket_endpoint(websocket: WebSocket, session_id: str, db: Session = Depends(get_db)):
+async def pdf_qa_websocket_endpoint(websocket: WebSocket, session_id: str, db: Session = Depends(get_db)):
     try:
         # Attempt to connect (will fail if session is not authorized)
-        is_connected = await manager.connect(websocket, session_id)
+        is_connected = await websocket_manager.connect_websocket(websocket, session_id)
         
         if not is_connected:
             return
@@ -281,14 +277,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str, db: Session 
             response = "This is a placeholder response. The actual PDF-based Q&A will be implemented later."
             
             # Send response back to client
-            await manager.send_message(response, session_id)
+            await websocket_manager.send_websocket_message(response, session_id)
             
     except WebSocketDisconnect:
-        await manager.disconnect(session_id)
+        await websocket_manager.disconnect_websocket(session_id)
         # Clean up files only if this session had established a connection
-        if session_id in manager.connected_sessions:
-            await cleanup_session_files(session_id, db)
-            manager.connected_sessions.remove(session_id)
+        if session_id in websocket_manager.established_websocket_sessions:
+            await cleanup_session_pdf_files(session_id, db)
+            websocket_manager.established_websocket_sessions.remove(session_id)
     finally:
         # Ensure we clean up the connection if anything goes wrong
-        await manager.disconnect(session_id)
+        await websocket_manager.disconnect_websocket(session_id)
