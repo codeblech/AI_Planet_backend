@@ -2,7 +2,7 @@ from pathlib import Path
 
 # File upload settings
 MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB in bytes
-UPLOAD_DIR = Path("uploads") # For uploaded pdf files
+UPLOAD_DIR = Path("uploads")  # For uploaded pdf files
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 # Database settings

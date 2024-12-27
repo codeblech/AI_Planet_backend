@@ -16,10 +16,11 @@ from fastapi_limiter.depends import RateLimiter
 
 router = APIRouter()
 
+
 def get_upload_rate_limit_dependency():
     """
     Creates rate limiting dependency for upload endpoints.
-    
+
     Returns:
         list: List of FastAPI dependencies containing rate limiter if not in test environment,
               empty list otherwise.
@@ -28,9 +29,12 @@ def get_upload_rate_limit_dependency():
         return [Depends(RateLimiter(times=5, seconds=60))]
     return []
 
+
 @router.post("/uploadfiles/", dependencies=get_upload_rate_limit_dependency())
 async def create_upload_files(
-    files: Annotated[list[UploadFile], File(description="Multiple files as UploadFile")],
+    files: Annotated[
+        list[UploadFile], File(description="Multiple files as UploadFile")
+    ],
     db: Session = Depends(get_db),
 ):
     """
@@ -73,7 +77,7 @@ async def create_upload_files(
     saved_files = []
     errors = []
     session_id = str(uuid.uuid4())
-    
+
     for file in files:
         try:
             if not file.filename:
@@ -90,68 +94,66 @@ async def create_upload_files(
             if file_size > MAX_FILE_SIZE:
                 raise FileSizeError(
                     file.filename,
-                    f"File size {file_size / (1024 * 1024):.2f}MB exceeds the limit of 30MB"
+                    f"File size {file_size / (1024 * 1024):.2f}MB exceeds the limit of 30MB",
                 )
-            
+
             # Check file extension and MIME type
-            if not file.filename.endswith('.pdf') or file.content_type != 'application/pdf':
+            if (
+                not file.filename.endswith(".pdf")
+                or file.content_type != "application/pdf"
+            ):
                 raise FileTypeError(
                     file.filename,
-                    f"Invalid file type. Only PDF files are allowed (got {file.content_type})"
+                    f"Invalid file type. Only PDF files are allowed (got {file.content_type})",
                 )
-            
+
             # Generate and save file with unique name
             original_name = Path(file.filename).stem
             file_extension = Path(file.filename).suffix
             unique_filename = f"{original_name}_{uuid.uuid4()}{file_extension}"
             file_path = UPLOAD_DIR / unique_filename
-            
+
             try:
-                async with aiofiles.open(file_path, 'wb') as f:
+                async with aiofiles.open(file_path, "wb") as f:
                     await f.write(contents)
             except IOError as e:
                 raise FileUploadError(file.filename, f"Failed to save file: {str(e)}")
-            
+
             # After successful file save, store metadata in database
             file_upload = PDFFileUpload(
                 original_filename=file.filename,
                 saved_filename=unique_filename,
                 file_size=file_size,
                 session_id=session_id,
-                content_type=file.content_type
+                content_type=file.content_type,
             )
             db.add(file_upload)
             db.commit()
-            
-            saved_files.append({
-                "original_name": file.filename,
-                "saved_name": unique_filename
-            })
-                
+
+            saved_files.append(
+                {"original_name": file.filename, "saved_name": unique_filename}
+            )
+
         except (FileUploadError, FileSizeError, FileTypeError) as e:
-            errors.append({
-                "filename": e.filename,
-                "error": e.message
-            })
+            errors.append({"filename": e.filename, "error": e.message})
         except Exception as e:
-            errors.append({
-                "filename": getattr(file, 'filename', 'Unknown'),
-                "error": f"Unexpected error: {str(e)}"
-            })
-            
+            errors.append(
+                {
+                    "filename": getattr(file, "filename", "Unknown"),
+                    "error": f"Unexpected error: {str(e)}",
+                }
+            )
+
     response = {"files": saved_files}
     if errors:
         response["errors"] = errors
-        
+
     if not saved_files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "message": "No files were successfully uploaded",
-                "errors": errors
-            }
+            detail={"message": "No files were successfully uploaded", "errors": errors},
         )
-        
+
     if saved_files:
         # Authorize this session for WebSocket connections
         websocket_manager.authorize_upload_session(session_id)
@@ -159,6 +161,7 @@ async def create_upload_files(
         response["session_id"] = session_id
 
     return response
+
 
 @router.get("/")
 async def main():
@@ -176,4 +179,4 @@ async def main():
     </form>
     </body>
     """
-    return HTMLResponse(content=content) 
+    return HTMLResponse(content=content)

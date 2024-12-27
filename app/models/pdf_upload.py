@@ -2,6 +2,7 @@ from datetime import datetime, UTC
 from sqlalchemy import Column, Integer, String, DateTime
 from ..database import Base
 
+
 class PDFFileUpload(Base):
     """SQLAlchemy model representing uploaded PDF files in the system.
 
@@ -26,4 +27,4 @@ class PDFFileUpload(Base):
     file_size = Column(Integer)
     upload_datetime = Column(DateTime, default=lambda: datetime.now(UTC))
     session_id = Column(String)
-    content_type = Column(String) 
+    content_type = Column(String)

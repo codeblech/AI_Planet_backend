@@ -1,6 +1,7 @@
 from typing import Dict, Set
 from fastapi import WebSocket
 
+
 class WebSocketConnectionManager:
     """
     Manages WebSocket connections and session authorization.
@@ -54,4 +55,5 @@ class WebSocketConnectionManager:
         self.authorized_upload_sessions.add(session_id)
         print(f"Authorized new session: {session_id}")
 
-websocket_manager = WebSocketConnectionManager() 
+
+websocket_manager = WebSocketConnectionManager()

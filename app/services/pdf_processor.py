@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Dict
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
@@ -28,10 +29,10 @@ class PDFProcessor:
         genai.configure(api_key=os.environ["GEMINI_API_KEY"])
         self.embedding_model = "models/text-embedding-004"
         self.llm = genai.GenerativeModel("gemini-1.5-flash")
-        
+
         # Initialize ChromaDB
         self.chroma_client = chromadb.Client()
-        
+
         self.collections: Dict[str, chromadb.Collection] = {}
 
     def _extract_text_from_pdf(self, pdf_path: Path) -> str:
@@ -56,16 +57,13 @@ class PDFProcessor:
         # Create a new collection for this session
         collection = self.chroma_client.create_collection(name=session_id)
         self.collections[session_id] = collection
-        
+
         # Process each PDF
         for i, pdf_path in enumerate(pdf_paths):
             text = self._extract_text_from_pdf(pdf_path)
-            
+
             # Add to ChromaDB with document ID based on file name
-            collection.add(
-                documents=[text],
-                ids=[f"{session_id}_doc_{i}"]
-            )
+            collection.add(documents=[text], ids=[f"{session_id}_doc_{i}"])
 
     async def get_answer(self, session_id: str, question: str) -> str:
         """
@@ -80,16 +78,15 @@ class PDFProcessor:
         """
         if session_id not in self.collections:
             return "No documents found for this session. Please upload PDFs first."
-        
+
         # Query the collection to get relevant context
         results = self.collections[session_id].query(
-            query_texts=[question],
-            n_results=2
+            query_texts=[question], n_results=2
         )
-        
+
         # Combine relevant documents as context
-        context = "\n".join(results['documents'][0])
-        
+        context = "\n".join(results["documents"][0])
+
         # Generate prompt for Gemini
         prompt = f"""Based on the following context, answer the question. 
         If the answer cannot be found in the context, say "I cannot find the answer in the provided documents."
@@ -98,7 +95,7 @@ class PDFProcessor:
         {context}
         
         Question: {question}"""
-        
+
         # Generate response using Gemini
         response = self.llm.generate_content(prompt)
         return response.text

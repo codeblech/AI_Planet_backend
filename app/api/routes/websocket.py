@@ -11,6 +11,7 @@ from ...services.pdf_processor import PDFProcessor
 
 router = APIRouter()
 
+
 async def cleanup_session_pdf_files(session_id: str, db: Session):
     """
     Clean up PDF files associated with a specific session.
@@ -24,7 +25,7 @@ async def cleanup_session_pdf_files(session_id: str, db: Session):
     """
     # Get all files for this session
     files = db.query(PDFFileUpload).filter(PDFFileUpload.session_id == session_id).all()
-    
+
     # Delete each file
     for file in files:
         file_path = UPLOAD_DIR / file.saved_filename
@@ -34,12 +35,14 @@ async def cleanup_session_pdf_files(session_id: str, db: Session):
             db.delete(file)  # Remove database entry
         except Exception as e:
             print(f"Error deleting file {file.saved_filename}: {e}")
-    
+
     db.commit()
 
 
 @router.websocket("/ws/{session_id}")
-async def pdf_qa_websocket_endpoint(websocket: WebSocket, session_id: str, db: Session = Depends(get_db)):
+async def pdf_qa_websocket_endpoint(
+    websocket: WebSocket, session_id: str, db: Session = Depends(get_db)
+):
     """
     WebSocket endpoint for PDF question-answering functionality.
 
@@ -60,39 +63,41 @@ async def pdf_qa_websocket_endpoint(websocket: WebSocket, session_id: str, db: S
     """
     try:
         is_connected = await websocket_manager.connect_websocket(websocket, session_id)
-        
+
         if not is_connected:
             return
 
         # Initialize PDF processor
         pdf_processor = PDFProcessor()
-        
+
         # Get PDF files for this session
-        pdf_files = db.query(PDFFileUpload).filter(PDFFileUpload.session_id == session_id).all()
+        pdf_files = (
+            db.query(PDFFileUpload).filter(PDFFileUpload.session_id == session_id).all()
+        )
         pdf_paths = [UPLOAD_DIR / file.saved_filename for file in pdf_files]
-        
+
         # Process PDFs
         await pdf_processor.process_pdfs(session_id, pdf_paths)
-        
+
         # Only apply rate limiting if not in test environment
         if "pytest" not in sys.modules:
             ratelimit = WebSocketRateLimiter(times=10, seconds=60)
-        
+
         try:
             while True:
                 question = await websocket.receive_text()
-                
+
                 # Apply rate limiting only if not in test environment
                 if "pytest" not in sys.modules:
                     await ratelimit(websocket, context_key=session_id)
-                
+
                 # Get answer from PDF processor
                 response = await pdf_processor.get_answer(session_id, question)
                 await websocket_manager.send_websocket_message(response, session_id)
-                
+
         except WebSocketDisconnect:
             raise
-            
+
     except WebSocketDisconnect:
         await websocket_manager.disconnect_websocket(session_id)
         if session_id in websocket_manager.established_websocket_sessions:
