@@ -2,14 +2,17 @@ from fastapi.testclient import TestClient
 from fastapi import WebSocketDisconnect
 from pathlib import Path
 import pytest
-from main import app, websocket_manager, UPLOAD_DIR, PDFFileUpload
-import os
+from app.api.routes.upload import UPLOAD_DIR
+from app.api.routes.websocket import websocket_manager
+from app.database import SessionLocal, Base, engine
+from app.models.pdf_upload import PDFFileUpload
+from app.main import app
 from fastapi_limiter import FastAPILimiter
 import redis.asyncio as redis
 import pytest_asyncio
-from main import SessionLocal, Base, engine
 import shutil
 import asyncio
+import os
 
 client = TestClient(app)
 
