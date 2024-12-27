@@ -1,7 +1,10 @@
 uploads/
+chroma_db/
 *.pyc
 __pycache__
 *.db
 .pytest_cache
 .env
 *.pdf
+*.sqlite3
+*.bin
