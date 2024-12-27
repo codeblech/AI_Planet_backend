@@ -2,11 +2,12 @@ from fastapi.testclient import TestClient
 from fastapi import WebSocketDisconnect
 from pathlib import Path
 import pytest
-from main import app, manager, UPLOAD_DIR
+from main import app, manager, UPLOAD_DIR, Session
 import os
 from fastapi_limiter import FastAPILimiter
 import redis.asyncio as redis
 import pytest_asyncio
+from sqlalchemy.orm import Session
 
 client = TestClient(app)
 

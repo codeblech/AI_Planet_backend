@@ -12,6 +12,10 @@ import uuid
 import aiofiles
 from typing import Dict, Set
 import sys
+from sqlalchemy import create_engine, Column, String, DateTime, Integer
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, Session
+from datetime import datetime
 
 MAX_FILE_SIZE = 30 * 1024 * 1024  # 30MB in bytes
 UPLOAD_DIR = Path("uploads")
@@ -96,13 +100,44 @@ def get_rate_limit_dependency():
         return [Depends(RateLimiter(times=10, seconds=60))]
     return []
 
+# Add database configuration
+DATABASE_URL = "sqlite:///./sql_app.db"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Add File model
+class FileUpload(Base):
+    __tablename__ = "file_uploads"
+
+    id = Column(Integer, primary_key=True, index=True)
+    original_filename = Column(String)
+    saved_filename = Column(String, unique=True)
+    file_size = Column(Integer)  # in bytes
+    upload_datetime = Column(DateTime, default=datetime.utcnow)
+    session_id = Column(String)
+    content_type = Column(String)
+
+# Create tables
+Base.metadata.create_all(bind=engine)
+
+# Add dependency to get database session
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
 @app.post("/uploadfiles/", dependencies=get_rate_limit_dependency())
 async def create_upload_files(
     files: Annotated[list[UploadFile], File(description="Multiple files as UploadFile")],
+    db: Session = Depends(get_db),
     status_code=status.HTTP_201_CREATED,
 ):
     saved_files = []
     errors = []
+    session_id = str(uuid.uuid4())  # Move this up since we'll use it for all files
     
     for file in files:
         try:
@@ -142,6 +177,17 @@ async def create_upload_files(
             except IOError as e:
                 raise FileUploadError(file.filename, f"Failed to save file: {str(e)}")
             
+            # After successful file save, store metadata in database
+            file_upload = FileUpload(
+                original_filename=file.filename,
+                saved_filename=unique_filename,
+                file_size=file_size,
+                session_id=session_id,
+                content_type=file.content_type
+            )
+            db.add(file_upload)
+            db.commit()
+            
             saved_files.append({
                 "original_name": file.filename,
                 "saved_name": unique_filename
@@ -172,8 +218,6 @@ async def create_upload_files(
         )
         
     if saved_files:
-        # Generate a session ID for this upload
-        session_id = str(uuid.uuid4())
         # Authorize this session for WebSocket connections
         manager.authorize_session(session_id)
         # Add session_id to the response

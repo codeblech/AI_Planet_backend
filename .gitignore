@@ -1,3 +1,4 @@
 uploads/
 *.pyc
 __pycache__
+*.db
