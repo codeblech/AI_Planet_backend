@@ -7,10 +7,14 @@ from fastapi_limiter import FastAPILimiter
 from .config import CORS_ORIGINS
 from .database import Base, engine
 from .api.routes import upload, websocket
+import os
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    redis_instance = redis.from_url("redis://localhost:6379", encoding="utf-8", decode_responses=True)
+    if os.getenv("REDIS_URL"):
+        redis_instance = redis.from_url(os.getenv("REDIS_URL"), encoding="utf-8", decode_responses=True)
+    else:
+        redis_instance = redis.from_url("redis://localhost:6379", encoding="utf-8", decode_responses=True)
     await FastAPILimiter.init(redis_instance)
     yield
     await redis_instance.close()
