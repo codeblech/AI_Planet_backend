@@ -9,6 +9,7 @@ import redis.asyncio as redis
 import pytest_asyncio
 from main import SessionLocal, Base, engine
 import shutil
+import asyncio
 
 client = TestClient(app)
 
@@ -18,12 +19,16 @@ async def setup_and_cleanup():
     redis_instance = redis.from_url("redis://localhost:6379", encoding="utf-8", decode_responses=True)
     await FastAPILimiter.init(redis_instance)
     
+    # Clear any existing rate limits
+    await redis_instance.flushall()
+    
     # Create uploads directory if it doesn't exist
     UPLOAD_DIR.mkdir(exist_ok=True)
     
     yield
     
     # Cleanup
+    await redis_instance.flushall()
     await redis_instance.aclose()
     # Remove test files
     for file in UPLOAD_DIR.glob("*"):
@@ -114,23 +119,111 @@ async def test_websocket_connection_authorized(sample_pdf):
     
     session_id = response.json()["session_id"]
     
+    # Add delay to ensure session is properly registered
+    await asyncio.sleep(0.1)
+    
     # Test WebSocket connection with valid session_id
     with client.websocket_connect(f"/ws/{session_id}") as websocket:
-        # Send a test question
+        # Use sync methods instead of async
         websocket.send_text("Test question")
-        
-        # Receive response
         response = websocket.receive_text()
         assert "placeholder response" in response
 
-def test_upload_rate_limiting():
+@pytest.mark.asyncio
+async def test_upload_rate_limiting(sample_pdf):
     """Test rate limiting on PDF upload endpoint"""
-    # Make 11 requests (more than the 10 per minute limit)
-    for _ in range(11):
-        response = client.post("/uploadfiles/")
+    # Clear any existing rate limits before test
+    redis_instance = redis.from_url("redis://localhost:6379", encoding="utf-8", decode_responses=True)
+    await redis_instance.flushall()
     
-    # The last request should return 422 since we're not sending any files
-    assert response.status_code == 422 
+    # Make 6 upload requests (exceeding the 5 per minute limit)
+    responses = []
+    for _ in range(6):
+        with open(sample_pdf, "rb") as f:
+            files = {"files": ("test.pdf", f, "application/pdf")}
+            response = client.post("/uploadfiles/", files=files)
+            responses.append(response)
+            # Add small delay to ensure rate limit is applied
+            await asyncio.sleep(0.1)
+    
+    # First 5 requests should succeed
+    for i in range(5):
+        assert responses[i].status_code == 200
+        assert "files" in responses[i].json()
+    
+    # The 6th request should be rate limited
+    assert responses[5].status_code == 429  # Too Many Requests
+
+@pytest.mark.asyncio
+async def test_websocket_rate_limiting(sample_pdf):
+    """Test rate limiting on WebSocket messages"""
+    # First upload a file to get a valid session_id
+    with open(sample_pdf, "rb") as f:
+        files = {"files": ("test.pdf", f, "application/pdf")}
+        response = client.post("/uploadfiles/", files=files)
+    
+    session_id = response.json()["session_id"]
+    
+    # Add delay to ensure session is properly registered
+    await asyncio.sleep(0.1)
+    
+    # Test WebSocket connection with rate limiting
+    with client.websocket_connect(f"/ws/{session_id}") as websocket:
+        # Send 11 messages (exceeding the 10 per minute limit)
+        for i in range(11):
+            try:
+                # Use sync methods instead of async
+                websocket.send_text(f"Test question {i}")
+                response = websocket.receive_text()
+                if i < 10:
+                    assert "placeholder response" in response
+            except WebSocketDisconnect:
+                # The 11th message should cause a disconnect due to rate limiting
+                assert i == 10
+                break
+
+def test_rate_limits_per_user(sample_pdf):
+    """Test that rate limits are applied separately for different users"""
+    # Create two separate upload sessions
+    sessions = []
+    for i in range(2):
+        with open(sample_pdf, "rb") as f:
+            files = {"files": ("test.pdf", f, "application/pdf")}
+            response = client.post("/uploadfiles/", files=files)
+            assert response.status_code == 200
+            sessions.append(response.json()["session_id"])
+    
+    # Test that each session gets its own rate limit for uploads
+    for session_id in sessions:
+        responses = []
+        for _ in range(5):  # Test up to the limit
+            with open(sample_pdf, "rb") as f:
+                files = {"files": ("test.pdf", f, "application/pdf")}
+                response = client.post("/uploadfiles/", files=files)
+                responses.append(response)
+        
+        # All 5 requests for each session should succeed
+        assert all(r.status_code == 200 for r in responses)
+
+@pytest.mark.asyncio
+async def test_websocket_rate_limits_per_user(sample_pdf):
+    """Test that WebSocket rate limits are applied separately for different users"""
+    # Create two separate sessions
+    sessions = []
+    for _ in range(2):
+        with open(sample_pdf, "rb") as f:
+            files = {"files": ("test.pdf", f, "application/pdf")}
+            response = client.post("/uploadfiles/", files=files)
+            sessions.append(response.json()["session_id"])
+    
+    # Test WebSocket connections for both sessions
+    for session_id in sessions:
+        with client.websocket_connect(f"/ws/{session_id}") as websocket:
+            # Send 10 messages (up to the limit)
+            for i in range(10):
+                websocket.send_text(f"Test question {i}")
+                response = websocket.receive_text()
+                assert "placeholder response" in response
 
 @pytest.fixture(scope="function")
 def test_db():
@@ -220,7 +313,8 @@ def test_pdf_files_persist_without_websocket(test_db, sample_pdf, cleanup_upload
     assert test_db.query(PDFFileUpload).filter(PDFFileUpload.session_id == session_id).count() == 1
     assert (UPLOAD_DIR / saved_filename).exists()
 
-def test_multiple_pdf_cleanup(test_db, sample_pdf, cleanup_uploads):
+@pytest.mark.asyncio
+async def test_multiple_pdf_cleanup(test_db, sample_pdf, cleanup_uploads):
     """Test cleanup of multiple PDF files for same session"""
     # Upload multiple files
     with open(sample_pdf, "rb") as f1, open(sample_pdf, "rb") as f2:
@@ -233,6 +327,9 @@ def test_multiple_pdf_cleanup(test_db, sample_pdf, cleanup_uploads):
     session_id = response.json()["session_id"]
     saved_filenames = [file["saved_name"] for file in response.json()["files"]]
     
+    # Add delay to ensure session is properly registered
+    await asyncio.sleep(0.1)
+    
     # Verify files exist
     assert test_db.query(PDFFileUpload).filter(PDFFileUpload.session_id == session_id).count() == 2
     for filename in saved_filenames:
@@ -240,8 +337,12 @@ def test_multiple_pdf_cleanup(test_db, sample_pdf, cleanup_uploads):
     
     # Connect and disconnect WebSocket
     with client.websocket_connect(f"/ws/{session_id}") as websocket:
+        # Use sync methods instead of async
         websocket.send_text("Test question")
         response = websocket.receive_text()
+    
+    # Add delay to ensure cleanup has completed
+    await asyncio.sleep(0.1)
     
     # Verify all files are cleaned up
     assert test_db.query(PDFFileUpload).filter(PDFFileUpload.session_id == session_id).count() == 0

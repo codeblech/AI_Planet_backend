@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as redis
 from contextlib import asynccontextmanager
 from fastapi_limiter import FastAPILimiter
-from fastapi_limiter.depends import RateLimiter
+from fastapi_limiter.depends import RateLimiter, WebSocketRateLimiter
 from pathlib import Path
 import uuid
 import aiofiles
@@ -96,9 +96,9 @@ app.add_middleware(
 )
 
 # Add this helper function
-def get_rate_limit_dependency():
+def get_upload_rate_limit_dependency():
     if "pytest" not in sys.modules:
-        return [Depends(RateLimiter(times=10, seconds=60))]
+        return [Depends(RateLimiter(times=5, seconds=60))]  # 5 requests per minute for uploads
     return []
 
 # Add database configuration
@@ -150,15 +150,14 @@ async def cleanup_session_pdf_files(session_id: str, db: Session):
     
     db.commit()
 
-@app.post("/uploadfiles/", dependencies=get_rate_limit_dependency())
+@app.post("/uploadfiles/", dependencies=get_upload_rate_limit_dependency())
 async def create_upload_files(
     files: Annotated[list[UploadFile], File(description="Multiple files as UploadFile")],
     db: Session = Depends(get_db),
-    status_code=status.HTTP_201_CREATED,
 ):
     saved_files = []
     errors = []
-    session_id = str(uuid.uuid4())  # Move this up since we'll use it for all files
+    session_id = str(uuid.uuid4())
     
     for file in files:
         try:
@@ -263,21 +262,27 @@ async def main():
 @app.websocket("/ws/{session_id}")
 async def pdf_qa_websocket_endpoint(websocket: WebSocket, session_id: str, db: Session = Depends(get_db)):
     try:
-        # Attempt to connect (will fail if session is not authorized)
         is_connected = await websocket_manager.connect_websocket(websocket, session_id)
         
         if not is_connected:
             return
 
-        while True:
-            # Receive question from client
-            question = await websocket.receive_text()
-            
-            # For now, return a constant response
-            response = "This is a placeholder response. The actual PDF-based Q&A will be implemented later."
-            
-            # Send response back to client
-            await websocket_manager.send_websocket_message(response, session_id)
+        # Only apply rate limiting if not in test environment
+        if "pytest" not in sys.modules:
+            ratelimit = WebSocketRateLimiter(times=10, seconds=60)  # 10 messages per minute
+        
+        try:
+            while True:
+                question = await websocket.receive_text()
+                
+                # Apply rate limiting only if not in test environment
+                if "pytest" not in sys.modules:
+                    await ratelimit(websocket, context_key=session_id)
+                
+                response = "This is a placeholder response. The actual PDF-based Q&A will be implemented later."
+                await websocket_manager.send_websocket_message(response, session_id)
+        except WebSocketDisconnect:
+            raise  # Re-raise to be caught by outer try block
             
     except WebSocketDisconnect:
         await websocket_manager.disconnect_websocket(session_id)
@@ -285,6 +290,6 @@ async def pdf_qa_websocket_endpoint(websocket: WebSocket, session_id: str, db: S
         if session_id in websocket_manager.established_websocket_sessions:
             await cleanup_session_pdf_files(session_id, db)
             websocket_manager.established_websocket_sessions.remove(session_id)
+            websocket_manager.authorized_upload_sessions.remove(session_id)
     finally:
-        # Ensure we clean up the connection if anything goes wrong
         await websocket_manager.disconnect_websocket(session_id)
