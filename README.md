@@ -119,7 +119,7 @@ only extracting text from pdfs as the requirement says.
 
 ### LangChain bad
 This is my third time trying to use LangChain. Now I've come to the conclusion that it is not worth the hassle. It is much simpler to implement the AI stuff without it. I tried to use LangChain for the pdf processing, but this library somehow manages to break every single thing it aims to optimize. 
-Further, it has a lot of dependencies and bloat which make it totally unsuitable for production.
+Further, it has a lot of dependencies and bloat which makes it totally unsuitable for production.
 
 ### LlamaIndex?
 The docs are horrible. And the library suffers from the same problems as LangChain. Too much abstraction. 
