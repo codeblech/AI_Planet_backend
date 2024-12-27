@@ -3,7 +3,7 @@
 A FastAPI backend service that enables real-time question-answering over uploaded PDF documents using WebSockets. Uses Gemini for text generation and ChromaDB for vector storage.
 
 
-## BackendDeployment link
+## Backend Deployment link
 https://ai-planet-backend-h3cw.onrender.com/ 
 
 > Free service of render is very slow to boot up.
