@@ -32,3 +32,14 @@ https://github.com/long2ice/fastapi-limiter/issues/51
 
 ### serving the frontend
 if frontend is served from a live server like that in vscode, then it must be made sure that the upload folder is not served from that server. this is because the creation of new file in the upload folder will trigger a reload of the frontend, which will break the websocket connection.
+
+
+### extracting only text
+as the requirement says.
+
+
+### ephemeral document storage
+once some kind of user auth is implemented we can make the document storage persistent. But since the current requirement does not mention user auth, we'll just delete the files after the user disconnects.
+
+### periodic cleanup up uploads folder
+in case that the client uploads files, but doesn't establish the websocket connection, the uploaded documents remain saved. These can be later deleted using a periodic cleanup task, which can be easily implemented using a cron job.

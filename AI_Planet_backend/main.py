@@ -1,6 +1,6 @@
 from typing import Annotated
-from fastapi import FastAPI, File, UploadFile, status, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi import FastAPI, File, UploadFile, status, HTTPException, Depends, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 
 import redis.asyncio as redis
