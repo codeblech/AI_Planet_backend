@@ -1,18 +1,26 @@
 Services
 ========
 
-PDF Processor
-------------
+PDF Processing Service
+--------------------
 
 .. automodule:: app.services.pdf_processor
    :members:
    :undoc-members:
    :show-inheritance:
 
-WebSocket Manager
----------------
+AI Service
+---------
 
-.. automodule:: app.services.websocket_manager
+.. automodule:: app.services.ai_service
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+Database Service
+--------------
+
+.. automodule:: app.services.db_service
    :members:
    :undoc-members:
    :show-inheritance:
