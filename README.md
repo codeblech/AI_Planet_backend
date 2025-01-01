@@ -15,7 +15,7 @@ To serve the frontend locally:
 cd frontend
 python -m http.server 9000
 ```
-> This frontend is currently configured to with with locally hosted backend. It can be changed to use the deployed backend by changing the url in the fetch requrests.
+> This frontend is currently configured to work with locally hosted backend. It can be changed to use the deployed backend by changing the url in the fetch requrests.
 
 
 ## Demo
